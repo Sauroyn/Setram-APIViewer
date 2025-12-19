@@ -265,6 +265,7 @@ export default function MapComponent({
 
       const nowSec = Date.now() / 1000;
       let hasAnyState = false;
+      const finishedIds: string[] = [];
 
       animationStates.current.forEach((state, vehicleId) => {
         const marker = markers.current.get(vehicleId);
@@ -273,25 +274,24 @@ export default function MapComponent({
         const span = Math.max(0.5, state.endTs - state.startTs); // éviter division par 0
         const t = (nowSec - state.startTs) / span;
 
-        let currentLng: number;
-        let currentLat: number;
-
-        if (t <= 1) {
-          // Interpolation linéaire (vitesse constante pour matcher le temps d'arrivée)
-          currentLng = lerp(state.from.lng, state.to.lng, t);
-          currentLat = lerp(state.from.lat, state.to.lat, t);
-        } else {
-          // Extrapolation si la prochaine update tarde : continuer à même vitesse
-          const extra = Math.min(t - 1, 2); // limiter la dérive (max 2x la distance)
-          const dx = state.to.lng - state.from.lng;
-          const dy = state.to.lat - state.from.lat;
-          currentLng = state.to.lng + dx * extra;
-          currentLat = state.to.lat + dy * extra;
+        if (t >= 1) {
+          // Arrivé : se cale exactement sur la destination (pas d'overshoot)
+          marker.setLngLat([state.to.lng, state.to.lat]);
+          finishedIds.push(vehicleId);
+          return;
         }
+
+        // Interpolation avec easing (ease-out) pour lisser le rattrapage
+        const easedT = 1 - Math.pow(1 - t, 3);
+        const currentLng = lerp(state.from.lng, state.to.lng, easedT);
+        const currentLat = lerp(state.from.lat, state.to.lat, easedT);
 
         marker.setLngLat([currentLng, currentLat]);
         hasAnyState = true;
       });
+
+      // Nettoyer les animations terminées
+      finishedIds.forEach((id) => animationStates.current.delete(id));
 
       if (hasAnyState) {
         animationFrameId.current = requestAnimationFrame(animate);
@@ -405,8 +405,10 @@ export default function MapComponent({
             const currentLngLat = marker.getLngLat();
 
             const deltaSeconds = Math.max(0.5, Math.min(15, (vehicle.timestamp - prevVehicle.timestamp) || 1));
+            // Ralentir encore et ajouter plus de buffer pour un mouvement continu
+            const durationSeconds = Math.max(deltaSeconds + 2, Math.min(30, deltaSeconds * 2.2));
             const startTs = Date.now() / 1000;
-            const endTs = startTs + deltaSeconds;
+            const endTs = startTs + durationSeconds;
           
             animationStates.current.set(vehicle.id, {
               from: { lng: currentLngLat.lng, lat: currentLngLat.lat },
