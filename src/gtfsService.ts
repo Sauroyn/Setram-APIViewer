@@ -1,8 +1,14 @@
 import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 import { type Vehicle, type TripUpdate } from './types';
 
-const VEHICLE_POSITIONS_URL = '/api/vehicle-positions';
-const TRIP_UPDATES_URL = '/api/trip-updates';
+// URLs des APIs GTFS Realtime du transport.data.gouv.fr
+const VEHICLE_POSITIONS_URL = import.meta.env.PROD 
+  ? 'https://proxy.transport.data.gouv.fr/resource/setram-lemans-gtfs-rt-vehicle-position'
+  : '/api/vehicle-positions';
+
+const TRIP_UPDATES_URL = import.meta.env.PROD
+  ? 'https://proxy.transport.data.gouv.fr/resource/setram-lemans-gtfs-rt-trip-update'
+  : '/api/trip-updates';
 
 // Fonction pour récupérer et décoder les positions des véhicules
 export async function fetchVehiclePositions(): Promise<Vehicle[]> {
