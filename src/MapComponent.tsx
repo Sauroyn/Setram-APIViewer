@@ -15,6 +15,14 @@ interface MapComponentProps {
   onThemeToggle: () => void;
 }
 
+  // Type pour stocker la position précédente et courante d'un véhicule
+  interface VehicleAnimationState {
+    from: { lng: number; lat: number };
+    to: { lng: number; lat: number };
+    startTs: number; // secondes (epoch)
+    endTs: number;   // secondes (epoch)
+  }
+
 // Contrôle personnalisé pour le toggle de thème
 class ThemeToggleControl implements maplibregl.IControl {
   private container: HTMLDivElement | undefined;
@@ -81,6 +89,73 @@ class ThemeToggleControl implements maplibregl.IControl {
   }
 }
 
+  // Contrôle personnalisé pour le toggle d'animation
+  class AnimationToggleControl implements maplibregl.IControl {
+    private container: HTMLDivElement | undefined;
+    private button: HTMLButtonElement | undefined;
+    private onToggle: () => void;
+    private isAnimated: boolean;
+
+    constructor(isAnimated: boolean, onToggle: () => void) {
+      this.isAnimated = isAnimated;
+      this.onToggle = onToggle;
+    }
+
+    onAdd(): HTMLElement {
+      this.container = document.createElement('div');
+      this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    
+      this.button = document.createElement('button');
+      this.button.type = 'button';
+      this.button.title = this.isAnimated ? 'Désactiver l\'animation' : 'Activer l\'animation';
+      this.button.style.width = '29px';
+      this.button.style.height = '29px';
+      this.button.style.padding = '0';
+      this.button.style.display = 'flex';
+      this.button.style.alignItems = 'center';
+      this.button.style.justifyContent = 'center';
+      this.button.style.backgroundColor = 'var(--g-color-base-background)';
+      this.button.style.color = 'var(--g-color-text-primary)';
+      this.button.style.border = '1px solid var(--g-color-line-generic)';
+      this.button.style.borderRadius = '4px';
+      this.button.style.cursor = 'pointer';
+    
+      this.updateButtonContent();
+    
+      this.button.addEventListener('click', () => {
+        this.onToggle();
+      });
+    
+      this.container.appendChild(this.button);
+      return this.container;
+    }
+
+    private updateButtonContent(): void {
+      if (!this.button) return;
+    
+      // Icône de play/pause pour l'animation
+      this.button.innerHTML = this.isAnimated
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 5v14l11-7z"/></svg>';
+    }
+
+    onRemove(): void {
+      if (this.container && this.container.parentNode) {
+        this.container.parentNode.removeChild(this.container);
+      }
+    }
+
+    updateState(isAnimated: boolean): void {
+      this.isAnimated = isAnimated;
+      if (this.button) {
+        this.button.title = isAnimated ? 'Désactiver l\'animation' : 'Activer l\'animation';
+        this.button.style.backgroundColor = 'var(--g-color-base-background)';
+        this.button.style.color = 'var(--g-color-text-primary)';
+        this.updateButtonContent();
+      }
+    }
+  }
+
 export default function MapComponent({
   vehicles,
   vehicleHistory,
@@ -93,9 +168,14 @@ export default function MapComponent({
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<Map<string, maplibregl.Marker>>(new Map());
   const themeControl = useRef<ThemeToggleControl | null>(null);
+    const animationControl = useRef<AnimationToggleControl | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
   const isUserInteracting = useRef(false);
+    const [isAnimated, setIsAnimated] = useState(true);
+    const animationStates = useRef<Map<string, VehicleAnimationState>>(new Map());
+    const animationFrameId = useRef<number | null>(null);
+    const previousVehicles = useRef<Map<string, Vehicle>>(new Map());
 
   // Initialiser la carte (une seule fois)
   useEffect(() => {
@@ -117,6 +197,10 @@ export default function MapComponent({
     // Ajouter le contrôle de thème
     themeControl.current = new ThemeToggleControl(theme, onThemeToggle);
     map.current.addControl(themeControl.current, 'top-right');
+
+  // Ajouter le contrôle d'animation
+  animationControl.current = new AnimationToggleControl(isAnimated, () => setIsAnimated(!isAnimated));
+  map.current.addControl(animationControl.current, 'top-right');
 
     // Détecter les interactions utilisateur pour arrêter le suivi
     const handleUserInteraction = () => {
@@ -162,6 +246,59 @@ export default function MapComponent({
       themeControl.current.updateTheme(theme);
     }
   }, [theme]);
+
+    // Mettre à jour l'icône du contrôle d'animation quand l'état change
+    useEffect(() => {
+      if (animationControl.current) {
+        animationControl.current.updateState(isAnimated);
+      }
+    }, [isAnimated]);
+
+    // Fonction d'interpolation linéaire
+    const lerp = (start: number, end: number, t: number): number => {
+      return start + (end - start) * t;
+    };
+
+    // Fonction d'animation continue (interpolation + extrapolation pour éviter les arrêts)
+    const animate = () => {
+      if (!isAnimated) return;
+
+      const nowSec = Date.now() / 1000;
+      let hasAnyState = false;
+
+      animationStates.current.forEach((state, vehicleId) => {
+        const marker = markers.current.get(vehicleId);
+        if (!marker) return;
+
+        const span = Math.max(0.5, state.endTs - state.startTs); // éviter division par 0
+        const t = (nowSec - state.startTs) / span;
+
+        let currentLng: number;
+        let currentLat: number;
+
+        if (t <= 1) {
+          // Interpolation linéaire (vitesse constante pour matcher le temps d'arrivée)
+          currentLng = lerp(state.from.lng, state.to.lng, t);
+          currentLat = lerp(state.from.lat, state.to.lat, t);
+        } else {
+          // Extrapolation si la prochaine update tarde : continuer à même vitesse
+          const extra = Math.min(t - 1, 2); // limiter la dérive (max 2x la distance)
+          const dx = state.to.lng - state.from.lng;
+          const dy = state.to.lat - state.from.lat;
+          currentLng = state.to.lng + dx * extra;
+          currentLat = state.to.lat + dy * extra;
+        }
+
+        marker.setLngLat([currentLng, currentLat]);
+        hasAnyState = true;
+      });
+
+      if (hasAnyState) {
+        animationFrameId.current = requestAnimationFrame(animate);
+      } else {
+        animationFrameId.current = null;
+      }
+    };
 
   // Mettre à jour les marqueurs des véhicules
   useEffect(() => {
@@ -260,7 +397,32 @@ export default function MapComponent({
         markers.current.set(vehicle.id, marker);
       } else {
         // Mettre à jour la position du marqueur existant
-        marker.setLngLat([vehicle.longitude, vehicle.latitude]);
+          const prevVehicle = previousVehicles.current.get(vehicle.id);
+        
+          if (isAnimated && prevVehicle && 
+              (prevVehicle.latitude !== vehicle.latitude || prevVehicle.longitude !== vehicle.longitude)) {
+            // Mode animé : durée basée sur le delta temps réel, avec extrapolation en cas de retard
+            const currentLngLat = marker.getLngLat();
+
+            const deltaSeconds = Math.max(0.5, Math.min(15, (vehicle.timestamp - prevVehicle.timestamp) || 1));
+            const startTs = Date.now() / 1000;
+            const endTs = startTs + deltaSeconds;
+          
+            animationStates.current.set(vehicle.id, {
+              from: { lng: currentLngLat.lng, lat: currentLngLat.lat },
+              to: { lng: vehicle.longitude, lat: vehicle.latitude },
+              startTs,
+              endTs,
+            });
+
+            // Démarrer l'animation si elle n'est pas déjà en cours
+            if (!animationFrameId.current) {
+              animationFrameId.current = requestAnimationFrame(animate);
+            }
+          } else if (!isAnimated) {
+            // Mode normal : téléportation instantanée
+            marker.setLngLat([vehicle.longitude, vehicle.latitude]);
+          }
 
         // Mettre à jour la popup
         const popup = marker.getPopup();
@@ -320,7 +482,36 @@ export default function MapComponent({
         }
       }
     });
-  }, [vehicles, mapLoaded, onVehicleClick]);
+
+      // Mettre à jour la référence des véhicules précédents
+      const newPreviousVehicles = new Map<string, Vehicle>();
+      vehicles.forEach((vehicle) => {
+        newPreviousVehicles.set(vehicle.id, { ...vehicle });
+      });
+      previousVehicles.current = newPreviousVehicles;
+    }, [vehicles, mapLoaded, onVehicleClick, isAnimated]);
+
+    // Arrêter l'animation si on désactive le mode animé
+    useEffect(() => {
+      if (!isAnimated && animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+        animationFrameId.current = null;
+        animationStates.current.clear();
+      }
+
+      if (isAnimated && !animationFrameId.current && animationStates.current.size > 0) {
+        animationFrameId.current = requestAnimationFrame(animate);
+      }
+    }, [isAnimated]);
+
+    // Nettoyer l'animation au démontage
+    useEffect(() => {
+      return () => {
+        if (animationFrameId.current) {
+          cancelAnimationFrame(animationFrameId.current);
+        }
+      };
+    }, []);
 
   // Centrer sur un véhicule sélectionné
   useEffect(() => {
