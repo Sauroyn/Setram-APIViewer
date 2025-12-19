@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Vehicle } from './types';
@@ -173,6 +173,7 @@ export default function MapComponent({
   const [isTracking, setIsTracking] = useState(false);
   const isUserInteracting = useRef(false);
     const [isAnimated, setIsAnimated] = useState(true);
+    const isAnimatedRef = useRef(isAnimated);
     const animationStates = useRef<Map<string, VehicleAnimationState>>(new Map());
     const animationFrameId = useRef<number | null>(null);
     const previousVehicles = useRef<Map<string, Vehicle>>(new Map());
@@ -199,7 +200,7 @@ export default function MapComponent({
     map.current.addControl(themeControl.current, 'top-right');
 
   // Ajouter le contrôle d'animation
-  animationControl.current = new AnimationToggleControl(isAnimated, () => setIsAnimated(!isAnimated));
+  animationControl.current = new AnimationToggleControl(isAnimated, () => setIsAnimated(prev => !prev));
   map.current.addControl(animationControl.current, 'top-right');
 
     // Détecter les interactions utilisateur pour arrêter le suivi
@@ -249,6 +250,7 @@ export default function MapComponent({
 
     // Mettre à jour l'icône du contrôle d'animation quand l'état change
     useEffect(() => {
+      isAnimatedRef.current = isAnimated;
       if (animationControl.current) {
         animationControl.current.updateState(isAnimated);
       }
@@ -260,9 +262,7 @@ export default function MapComponent({
     };
 
     // Fonction d'animation continue (interpolation + extrapolation pour éviter les arrêts)
-    const animate = () => {
-      if (!isAnimated) return;
-
+    const animate = useCallback(() => {
       const nowSec = Date.now() / 1000;
       let hasAnyState = false;
       const finishedIds: string[] = [];
@@ -293,12 +293,12 @@ export default function MapComponent({
       // Nettoyer les animations terminées
       finishedIds.forEach((id) => animationStates.current.delete(id));
 
-      if (hasAnyState) {
+      if (hasAnyState && isAnimatedRef.current) {
         animationFrameId.current = requestAnimationFrame(animate);
       } else {
         animationFrameId.current = null;
       }
-    };
+    }, []);
 
   // Mettre à jour les marqueurs des véhicules
   useEffect(() => {
@@ -418,7 +418,7 @@ export default function MapComponent({
             });
 
             // Démarrer l'animation si elle n'est pas déjà en cours
-            if (!animationFrameId.current) {
+            if (!animationFrameId.current && isAnimated) {
               animationFrameId.current = requestAnimationFrame(animate);
             }
           } else if (!isAnimated) {
@@ -493,17 +493,22 @@ export default function MapComponent({
       previousVehicles.current = newPreviousVehicles;
     }, [vehicles, mapLoaded, onVehicleClick, isAnimated]);
 
-    // Arrêter l'animation si on désactive le mode animé
+    // Arrêter l'animation quand on désactive
     useEffect(() => {
       if (!isAnimated && animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
         animationFrameId.current = null;
+        // Téléporter tous les véhicules à leur position finale quand on désactive l'animation
+        animationStates.current.forEach((state, vehicleId) => {
+          const marker = markers.current.get(vehicleId);
+          if (marker) {
+            marker.setLngLat([state.to.lng, state.to.lat]);
+          }
+        });
         animationStates.current.clear();
       }
-
-      if (isAnimated && !animationFrameId.current && animationStates.current.size > 0) {
-        animationFrameId.current = requestAnimationFrame(animate);
-      }
+      // Note: La réactivation de l'animation se fera automatiquement
+      // lors de la prochaine mise à jour des véhicules dans le useEffect ci-dessus
     }, [isAnimated]);
 
     // Nettoyer l'animation au démontage
