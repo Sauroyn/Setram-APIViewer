@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Vehicle } from './types';
+import type { VehicleHistory } from './App';
+import { getLineInfo } from './utils';
 
 interface MapComponentProps {
   vehicles: Vehicle[];
+  vehicleHistory: VehicleHistory;
   selectedVehicleId: string | null;
   onVehicleClick: (vehicle: Vehicle) => void;
 }
 
 export default function MapComponent({
   vehicles,
+  vehicleHistory,
   selectedVehicleId,
   onVehicleClick,
 }: MapComponentProps) {
@@ -59,17 +63,15 @@ export default function MapComponent({
     // Ajouter ou mettre à jour les marqueurs
     vehicles.forEach((vehicle) => {
       let marker = markers.current.get(vehicle.id);
+      const { color, text } = getLineInfo(vehicle.routeId);
 
       if (!marker) {
         // Créer un nouveau marqueur
         const el = document.createElement('div');
         el.className = 'vehicle-marker';
         el.innerHTML = `
-          <div class="w-8 h-8 bg-blue-600 rounded-full border-2 border-white shadow-lg flex items-center justify-center cursor-pointer hover:bg-blue-700 transition-colors">
-            <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
-              <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3z"/>
-            </svg>
+          <div style="background-color: ${color}; border: 2px solid white; color: white; padding: 8px;" class="w-10 h-10 rounded-full shadow-lg flex items-center justify-center cursor-pointer hover:opacity-90 transition-opacity transform hover:scale-110 flex-shrink-0 box-border">
+            <span style="color: white;" class="font-bold text-xs leading-none">${text}</span>
           </div>
         `;
 
@@ -77,18 +79,59 @@ export default function MapComponent({
           .setLngLat([vehicle.longitude, vehicle.latitude]);
 
         // Créer une popup
-        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
-          <div class="p-2">
-            <h3 class="font-bold text-sm mb-1">Véhicule ${vehicle.label || vehicle.id}</h3>
-            <div class="text-xs space-y-0.5">
-              ${vehicle.routeId ? `<p><strong>Ligne:</strong> ${vehicle.routeId}</p>` : ''}
-              ${vehicle.tripId ? `<p><strong>Trajet:</strong> ${vehicle.tripId}</p>` : ''}
-              ${vehicle.speed !== undefined ? `<p><strong>Vitesse:</strong> ${Math.round(vehicle.speed * 3.6)} km/h</p>` : ''}
-              ${vehicle.bearing !== undefined ? `<p><strong>Direction:</strong> ${Math.round(vehicle.bearing)}°</p>` : ''}
-              <p><strong>Position:</strong> ${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</p>
+        const popupContent = `
+          <div class="p-2 min-w-[200px] max-h-[300px] overflow-y-auto">
+            <div class="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+              <div style="background-color: ${color};" class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                ${text}
+              </div>
+              <div>
+                <h3 class="font-bold text-base">Véhicule ${vehicle.label || vehicle.id}</h3>
+                <p class="text-xs text-gray-500">ID: ${vehicle.id}</p>
+              </div>
+            </div>
+            
+            <div class="space-y-2 text-sm">
+              <div class="grid grid-cols-2 gap-x-2 gap-y-1">
+                <div class="text-gray-600">Ligne:</div>
+                <div class="font-medium">${vehicle.routeId || 'N/A'}</div>
+                
+                <div class="text-gray-600">Trajet:</div>
+                <div class="font-medium truncate" title="${vehicle.tripId}">${vehicle.tripId || 'N/A'}</div>
+                
+                <div class="text-gray-600">Vitesse:</div>
+                <div class="font-medium">${vehicle.speed !== undefined ? `${Math.round(vehicle.speed * 3.6)} km/h` : 'N/A'}</div>
+                
+                <div class="text-gray-600">Direction:</div>
+                <div class="font-medium">${vehicle.bearing !== undefined ? `${Math.round(vehicle.bearing)}°` : 'N/A'}</div>
+                
+                <div class="text-gray-600">Retard:</div>
+                <div class="font-medium">
+                  ${vehicle.delay !== undefined 
+                    ? `<span class="${vehicle.delay > 60 ? 'text-red-600' : 'text-green-600'}">${Math.round(vehicle.delay / 60)} min</span>` 
+                    : 'N/A'}
+                </div>
+                
+                <div class="text-gray-600">Statut:</div>
+                <div class="font-medium">${vehicle.currentStatus || 'N/A'}</div>
+                
+                <div class="text-gray-600">Arrêt:</div>
+                <div class="font-medium truncate" title="${vehicle.stopId}">${vehicle.stopId || 'N/A'}</div>
+                
+                <div class="text-gray-600">Seq. arrêt:</div>
+                <div class="font-medium">${vehicle.currentStopSequence || 'N/A'}</div>
+              </div>
+              
+              <div class="pt-2 mt-2 border-t border-gray-100 text-xs text-gray-400">
+                <div>Lat: ${vehicle.latitude.toFixed(5)}</div>
+                <div>Lon: ${vehicle.longitude.toFixed(5)}</div>
+                <div>MàJ: ${new Date(vehicle.timestamp * 1000).toLocaleTimeString()}</div>
+              </div>
             </div>
           </div>
-        `);
+        `;
+
+        const popup = new maplibregl.Popup({ offset: 25, maxWidth: '300px' }).setHTML(popupContent);
 
         marker.setPopup(popup);
 
@@ -105,18 +148,58 @@ export default function MapComponent({
         // Mettre à jour la popup
         const popup = marker.getPopup();
         if (popup) {
-          popup.setHTML(`
-            <div class="p-2">
-              <h3 class="font-bold text-sm mb-1">Véhicule ${vehicle.label || vehicle.id}</h3>
-              <div class="text-xs space-y-0.5">
-                ${vehicle.routeId ? `<p><strong>Ligne:</strong> ${vehicle.routeId}</p>` : ''}
-                ${vehicle.tripId ? `<p><strong>Trajet:</strong> ${vehicle.tripId}</p>` : ''}
-                ${vehicle.speed !== undefined ? `<p><strong>Vitesse:</strong> ${Math.round(vehicle.speed * 3.6)} km/h</p>` : ''}
-                ${vehicle.bearing !== undefined ? `<p><strong>Direction:</strong> ${Math.round(vehicle.bearing)}°</p>` : ''}
-                <p><strong>Position:</strong> ${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</p>
+          const popupContent = `
+            <div class="p-2 min-w-[200px] max-h-[300px] overflow-y-auto">
+              <div class="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
+                <div style="background-color: ${color};" class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                  ${text}
+                </div>
+                <div>
+                  <h3 class="font-bold text-base">Véhicule ${vehicle.label || vehicle.id}</h3>
+                  <p class="text-xs text-gray-500">ID: ${vehicle.id}</p>
+                </div>
+              </div>
+              
+              <div class="space-y-2 text-sm">
+                <div class="grid grid-cols-2 gap-x-2 gap-y-1">
+                  <div class="text-gray-600">Ligne:</div>
+                  <div class="font-medium">${vehicle.routeId || 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Trajet:</div>
+                  <div class="font-medium truncate" title="${vehicle.tripId}">${vehicle.tripId || 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Vitesse:</div>
+                  <div class="font-medium">${vehicle.speed !== undefined ? `${Math.round(vehicle.speed * 3.6)} km/h` : 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Direction:</div>
+                  <div class="font-medium">${vehicle.bearing !== undefined ? `${Math.round(vehicle.bearing)}°` : 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Retard:</div>
+                  <div class="font-medium">
+                    ${vehicle.delay !== undefined 
+                      ? `<span class="${vehicle.delay > 60 ? 'text-red-600' : 'text-green-600'}">${Math.round(vehicle.delay / 60)} min</span>` 
+                      : 'N/A'}
+                  </div>
+                  
+                  <div class="text-gray-600">Statut:</div>
+                  <div class="font-medium">${vehicle.currentStatus || 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Arrêt:</div>
+                  <div class="font-medium truncate" title="${vehicle.stopId}">${vehicle.stopId || 'N/A'}</div>
+                  
+                  <div class="text-gray-600">Seq. arrêt:</div>
+                  <div class="font-medium">${vehicle.currentStopSequence || 'N/A'}</div>
+                </div>
+                
+                <div class="pt-2 mt-2 border-t border-gray-100 text-xs text-gray-400">
+                  <div>Lat: ${vehicle.latitude.toFixed(5)}</div>
+                  <div>Lon: ${vehicle.longitude.toFixed(5)}</div>
+                  <div>MàJ: ${new Date(vehicle.timestamp * 1000).toLocaleTimeString()}</div>
+                </div>
               </div>
             </div>
-          `);
+          `;
+          popup.setHTML(popupContent);
         }
       }
     });
@@ -137,10 +220,73 @@ export default function MapComponent({
       // Ouvrir la popup du marqueur
       const marker = markers.current.get(vehicle.id);
       if (marker) {
-        marker.togglePopup();
+        // On s'assure que la popup est ouverte
+        if (!marker.getPopup().isOpen()) {
+          marker.togglePopup();
+        }
       }
     }
-  }, [selectedVehicleId, vehicles]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedVehicleId]);
+
+  // Afficher le trajet du véhicule sélectionné
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const sourceId = 'vehicle-path';
+    const layerId = 'vehicle-path-layer';
+
+    // Supprimer la couche et la source existantes
+    if (map.current.getLayer(layerId)) {
+      map.current.removeLayer(layerId);
+    }
+    if (map.current.getSource(sourceId)) {
+      map.current.removeSource(sourceId);
+    }
+
+    // Si un véhicule est sélectionné et qu'il a un historique
+    if (selectedVehicleId && vehicleHistory[selectedVehicleId]) {
+      const history = vehicleHistory[selectedVehicleId];
+      
+      // Avoir au moins 2 points pour tracer une ligne
+      if (history.length >= 2) {
+        const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+        const { color } = vehicle ? getLineInfo(vehicle.routeId) : { color: '#3B82F6' };
+
+        // Créer les coordonnées pour la ligne
+        const coordinates = history.map((pos) => [pos.longitude, pos.latitude]);
+
+        // Ajouter la source
+        map.current.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: coordinates,
+            },
+          },
+        });
+
+        // Ajouter la couche (ligne)
+        map.current.addLayer({
+          id: layerId,
+          type: 'line',
+          source: sourceId,
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round',
+          },
+          paint: {
+            'line-color': color,
+            'line-width': 4,
+            'line-opacity': 0.7,
+          },
+        });
+      }
+    }
+  }, [selectedVehicleId, vehicleHistory, vehicles, mapLoaded]);
 
   return (
     <div ref={mapContainer} className="w-full h-full" />

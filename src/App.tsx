@@ -4,8 +4,20 @@ import VehicleSidebar from './VehicleSidebar';
 import { fetchVehiclePositions, fetchTripUpdates, mergeVehicleData } from './gtfsService';
 import type { Vehicle } from './types';
 
+// Type pour stocker l'historique des positions
+export interface VehiclePosition {
+  latitude: number;
+  longitude: number;
+  timestamp: number;
+}
+
+export interface VehicleHistory {
+  [vehicleId: string]: VehiclePosition[];
+}
+
 function App() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [vehicleHistory, setVehicleHistory] = useState<VehicleHistory>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,21 +38,87 @@ function App() {
       setVehicles((prevVehicles) => {
         const vehicleMap = new Map(mergedVehicles.map((v) => [v.id, v]));
         const updatedVehicles: Vehicle[] = [];
+        const now = Date.now() / 1000; // Timestamp actuel en secondes
+        const MAX_AGE = 300; // 5 minutes en secondes
         
-        // Garder les véhicules existants s'ils sont toujours présents
+        // Traiter les véhicules précédents
         prevVehicles.forEach((prevVehicle) => {
           if (vehicleMap.has(prevVehicle.id)) {
+            // Le véhicule est présent dans la nouvelle mise à jour -> on prend la nouvelle version
             updatedVehicles.push(vehicleMap.get(prevVehicle.id)!);
             vehicleMap.delete(prevVehicle.id);
+          } else {
+            // Le véhicule n'est PAS dans la nouvelle mise à jour
+            // On le garde SEULEMENT s'il n'est pas trop vieux (pour éviter les fantômes)
+            if (now - prevVehicle.timestamp < MAX_AGE) {
+              updatedVehicles.push(prevVehicle);
+            }
           }
         });
         
-        // Ajouter les nouveaux véhicules
+        // Ajouter les NOUVEAUX véhicules qui n'étaient pas là avant
         vehicleMap.forEach((vehicle) => {
           updatedVehicles.push(vehicle);
         });
         
         return updatedVehicles;
+      });
+
+      // Mise à jour de l'historique des positions
+      setVehicleHistory((prevHistory) => {
+        const newHistory = { ...prevHistory };
+        const MAX_HISTORY_POINTS = 100; // Maximum 100 points par véhicule
+        const MAX_HISTORY_AGE = 3600; // Garder l'historique pendant 1 heure (en secondes)
+        const now = Date.now() / 1000;
+
+        mergedVehicles.forEach((vehicle) => {
+          // Créer un nouveau point de position
+          const newPosition: VehiclePosition = {
+            latitude: vehicle.latitude,
+            longitude: vehicle.longitude,
+            timestamp: vehicle.timestamp,
+          };
+
+          // Initialiser l'historique si nécessaire
+          if (!newHistory[vehicle.id]) {
+            newHistory[vehicle.id] = [];
+          }
+
+          // Vérifier si cette position est différente de la dernière enregistrée
+          const lastPosition = newHistory[vehicle.id][newHistory[vehicle.id].length - 1];
+          const isDifferent = !lastPosition || 
+            lastPosition.latitude !== newPosition.latitude || 
+            lastPosition.longitude !== newPosition.longitude;
+
+          if (isDifferent) {
+            // Ajouter la nouvelle position
+            newHistory[vehicle.id] = [...newHistory[vehicle.id], newPosition];
+
+            // Limiter le nombre de points
+            if (newHistory[vehicle.id].length > MAX_HISTORY_POINTS) {
+              newHistory[vehicle.id] = newHistory[vehicle.id].slice(-MAX_HISTORY_POINTS);
+            }
+          }
+
+          // Nettoyer les vieux points
+          newHistory[vehicle.id] = newHistory[vehicle.id].filter(
+            (pos) => now - pos.timestamp < MAX_HISTORY_AGE
+          );
+        });
+
+        // Nettoyer l'historique des véhicules qui n'existent plus
+        const currentVehicleIds = new Set(mergedVehicles.map((v) => v.id));
+        Object.keys(newHistory).forEach((vehicleId) => {
+          if (!currentVehicleIds.has(vehicleId)) {
+            // Garder l'historique pendant un certain temps même si le véhicule n'est plus actif
+            const lastPosition = newHistory[vehicleId][newHistory[vehicleId].length - 1];
+            if (lastPosition && now - lastPosition.timestamp > MAX_HISTORY_AGE) {
+              delete newHistory[vehicleId];
+            }
+          }
+        });
+
+        return newHistory;
       });
       
       setIsLoading(false);
@@ -71,6 +149,7 @@ function App() {
       {/* Carte */}
       <MapComponent
         vehicles={vehicles}
+        vehicleHistory={vehicleHistory}
         selectedVehicleId={selectedVehicleId}
         onVehicleClick={handleVehicleClick}
       />

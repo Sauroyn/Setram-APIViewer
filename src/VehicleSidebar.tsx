@@ -1,4 +1,5 @@
 import type { Vehicle } from './types';
+import { getLineInfo } from './utils';
 
 interface VehicleSidebarProps {
   vehicles: Vehicle[];
@@ -74,30 +75,28 @@ export default function VehicleSidebar({
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
-                {vehicles.map((vehicle) => (
-                  <button
-                    key={vehicle.id}
-                    onClick={() => onVehicleSelect(vehicle.id)}
-                    className="w-full p-4 hover:bg-blue-50 transition-colors text-left"
-                  >
-                    <div className="flex items-start gap-3">
-                      {/* Icône de véhicule */}
-                      <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-                        <svg
-                          className="w-5 h-5 text-white"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
+                {vehicles.map((vehicle) => {
+                  const { color, text } = getLineInfo(vehicle.routeId);
+                  return (
+                    <button
+                      key={vehicle.id}
+                      onClick={() => onVehicleSelect(vehicle.id)}
+                      className="w-full p-4 hover:bg-blue-50 transition-colors text-left"
+                    >
+                      <div className="flex items-start gap-3">
+                        {/* Icône de véhicule */}
+                        <div 
+                          style={{ backgroundColor: color }} 
+                          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white font-bold text-sm border-2 border-white shadow-sm"
                         >
-                          <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                          <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3z" />
-                        </svg>
-                      </div>
-
-                      {/* Infos du véhicule */}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-gray-900 truncate">
-                          {vehicle.label || `Véhicule ${vehicle.id.substring(0, 8)}`}
+                          {text}
                         </div>
+
+                        {/* Infos du véhicule */}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-900 truncate">
+                            {vehicle.label || `Véhicule ${vehicle.id.substring(0, 8)}`}
+                          </div>
 
                         {vehicle.routeId && (
                           <div className="mt-1">
@@ -163,7 +162,7 @@ export default function VehicleSidebar({
                       </div>
                     </div>
                   </button>
-                ))}
+                ); })}
               </div>
             )}
           </div>
