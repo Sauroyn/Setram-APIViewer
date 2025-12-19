@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Spin, Card, Text } from '@gravity-ui/uikit';
+import { useEffect, useState, useCallback } from 'react';
+import { Spin, Card, Text, ThemeProvider } from '@gravity-ui/uikit';
 import MapComponent from './MapComponent';
 import VehicleSidebar from './VehicleSidebar';
 import { fetchVehiclePositions, fetchTripUpdates, mergeVehicleData } from './gtfsService';
 import type { Vehicle } from './types';
+import { useTheme } from './useTheme';
 
 // Type pour stocker l'historique des positions
 export interface VehiclePosition {
@@ -23,6 +24,9 @@ function App() {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [updatedCount, setUpdatedCount] = useState<number>(0);
+  const { theme, toggleTheme } = useTheme();
 
   // Fonction pour récupérer les données
   const fetchData = async () => {
@@ -41,12 +45,18 @@ function App() {
         const updatedVehicles: Vehicle[] = [];
         const now = Date.now() / 1000; // Timestamp actuel en secondes
         const MAX_AGE = 300; // 5 minutes en secondes
+        let updateCount = 0;
         
         // Traiter les véhicules précédents
         prevVehicles.forEach((prevVehicle) => {
           if (vehicleMap.has(prevVehicle.id)) {
             // Le véhicule est présent dans la nouvelle mise à jour -> on prend la nouvelle version
-            updatedVehicles.push(vehicleMap.get(prevVehicle.id)!);
+            const newVehicle = vehicleMap.get(prevVehicle.id)!;
+            updatedVehicles.push(newVehicle);
+            // Compter seulement si la position a changé
+            if (prevVehicle.latitude !== newVehicle.latitude || prevVehicle.longitude !== newVehicle.longitude) {
+              updateCount++;
+            }
             vehicleMap.delete(prevVehicle.id);
           } else {
             // Le véhicule n'est PAS dans la nouvelle mise à jour
@@ -60,7 +70,12 @@ function App() {
         // Ajouter les NOUVEAUX véhicules qui n'étaient pas là avant
         vehicleMap.forEach((vehicle) => {
           updatedVehicles.push(vehicle);
+          updateCount++; // Nouveau véhicule = mis à jour
         });
+        
+        // Mettre à jour les stats
+        setLastUpdate(new Date());
+        setUpdatedCount(updateCount);
         
         return updatedVehicles;
       });
@@ -145,26 +160,38 @@ function App() {
     setSelectedVehicleId(vehicle.id);
   };
 
+  // Utiliser useCallback pour éviter de recréer la fonction à chaque render
+  const handleThemeToggle = useCallback(() => {
+    toggleTheme();
+  }, [toggleTheme]);
+
   return (
-    <div className="w-screen h-screen relative">
-      {/* Carte */}
-      <MapComponent
-        vehicles={vehicles}
-        vehicleHistory={vehicleHistory}
-        selectedVehicleId={selectedVehicleId}
-        onVehicleClick={handleVehicleClick}
-      />
+    <ThemeProvider theme={theme}>
+      <div className="g-root w-screen h-screen relative" style={{ 
+        backgroundColor: 'var(--g-color-base-background)',
+        color: 'var(--g-color-text-primary)'
+      }}>
+        {/* Carte */}
+        <MapComponent
+          vehicles={vehicles}
+          vehicleHistory={vehicleHistory}
+          selectedVehicleId={selectedVehicleId}
+          onVehicleClick={handleVehicleClick}
+          theme={theme}
+          onThemeToggle={handleThemeToggle}
+        />
 
-      {/* Sidebar */}
-      <VehicleSidebar
-        vehicles={vehicles}
-        isOpen={isSidebarOpen}
-        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-        onVehicleSelect={handleVehicleSelect}
-      />
+        {/* Sidebar */}
+        <VehicleSidebar
+          vehicles={vehicles}
+          isOpen={isSidebarOpen}
+          onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+          onVehicleSelect={handleVehicleSelect}
+          onVehicleSelectMobile={() => setIsSidebarOpen(false)}
+        />
 
-      {/* Indicateur de chargement */}
-      {isLoading && (
+        {/* Indicateur de chargement */}
+        {isLoading && (
         <Card
           view="filled"
           style={{
@@ -213,20 +240,36 @@ function App() {
             position: 'fixed',
             bottom: '16px',
             right: '16px',
-            zIndex: 40,
+            zIndex: 100,
             padding: '12px 16px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            minWidth: '200px',
+            backgroundColor: 'var(--g-color-base-background)',
+            borderColor: 'var(--g-color-line-generic)'
           }}
         >
-          <Text variant="body-2">
-            <span style={{ fontWeight: 600, color: 'var(--g-color-text-brand)' }}>
-              {vehicles.length}
-            </span>
-            {' '}véhicule{vehicles.length > 1 ? 's' : ''} en circulation
-          </Text>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <Text variant="body-2">
+              <span style={{ fontWeight: 600, color: 'var(--g-color-text-brand)' }}>
+                {vehicles.length}
+              </span>
+              {' '}véhicule{vehicles.length > 1 ? 's' : ''} en circulation
+            </Text>
+            {updatedCount > 0 && (
+              <Text variant="caption-2" color="secondary">
+                {updatedCount} mis à jour
+              </Text>
+            )}
+            {lastUpdate && (
+              <Text variant="caption-2" color="hint">
+                Dernier refresh: {lastUpdate.toLocaleTimeString('fr-FR')}
+              </Text>
+            )}
+          </div>
         </Card>
       )}
-    </div>
+      </div>
+    </ThemeProvider>
   );
 }
 

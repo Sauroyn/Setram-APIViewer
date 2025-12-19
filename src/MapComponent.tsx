@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Vehicle } from './types';
 import type { VehicleHistory } from './App';
+import type { Theme } from './useTheme';
 import { getLineInfo } from './utils';
 
 interface MapComponentProps {
@@ -10,6 +11,74 @@ interface MapComponentProps {
   vehicleHistory: VehicleHistory;
   selectedVehicleId: string | null;
   onVehicleClick: (vehicle: Vehicle) => void;
+  theme: Theme;
+  onThemeToggle: () => void;
+}
+
+// Contrôle personnalisé pour le toggle de thème
+class ThemeToggleControl implements maplibregl.IControl {
+  private container: HTMLDivElement | undefined;
+  private button: HTMLButtonElement | undefined;
+  private onToggle: () => void;
+  private theme: Theme;
+
+  constructor(theme: Theme, onToggle: () => void) {
+    this.theme = theme;
+    this.onToggle = onToggle;
+  }
+
+  onAdd(): HTMLElement {
+    this.container = document.createElement('div');
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    
+    this.button = document.createElement('button');
+    this.button.type = 'button';
+    this.button.title = this.theme === 'light' ? 'Mode sombre' : 'Mode clair';
+    this.button.style.width = '29px';
+    this.button.style.height = '29px';
+    this.button.style.padding = '0';
+    this.button.style.display = 'flex';
+    this.button.style.alignItems = 'center';
+    this.button.style.justifyContent = 'center';
+    this.button.style.backgroundColor = 'var(--g-color-base-background)';
+    this.button.style.color = 'var(--g-color-text-primary)';
+    this.button.style.border = '1px solid var(--g-color-line-generic)';
+    this.button.style.borderRadius = '4px';
+    this.button.style.cursor = 'pointer';
+    
+    this.updateButtonContent();
+    
+    this.button.addEventListener('click', () => {
+      this.onToggle();
+    });
+    
+    this.container.appendChild(this.button);
+    return this.container;
+  }
+
+  private updateButtonContent(): void {
+    if (!this.button) return;
+    
+    this.button.innerHTML = this.theme === 'light' 
+      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><line x1="12" y1="1" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="21" x2="12" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="12" x2="3" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="21" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+  }
+
+  onRemove(): void {
+    if (this.container && this.container.parentNode) {
+      this.container.parentNode.removeChild(this.container);
+    }
+  }
+
+  updateTheme(theme: Theme): void {
+    this.theme = theme;
+    if (this.button) {
+      this.button.title = theme === 'light' ? 'Mode sombre' : 'Mode clair';
+      this.button.style.backgroundColor = 'var(--g-color-base-background)';
+      this.button.style.color = 'var(--g-color-text-primary)';
+      this.updateButtonContent();
+    }
+  }
 }
 
 export default function MapComponent({
@@ -17,34 +86,82 @@ export default function MapComponent({
   vehicleHistory,
   selectedVehicleId,
   onVehicleClick,
+  theme,
+  onThemeToggle,
 }: MapComponentProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const themeControl = useRef<ThemeToggleControl | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const isUserInteracting = useRef(false);
 
-  // Initialiser la carte
+  // Initialiser la carte (une seule fois)
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
+    const mapStyle = theme === 'dark' 
+      ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+      : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
+
     map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+      style: mapStyle,
       center: [0.1991, 48.0061], // Centre sur Le Mans
       zoom: 12,
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+    // Ajouter le contrôle de thème
+    themeControl.current = new ThemeToggleControl(theme, onThemeToggle);
+    map.current.addControl(themeControl.current, 'top-right');
+
+    // Détecter les interactions utilisateur pour arrêter le suivi
+    const handleUserInteraction = () => {
+      if (!isUserInteracting.current) {
+        isUserInteracting.current = true;
+        setIsTracking(false);
+      }
+    };
+
+    map.current.on('mousedown', handleUserInteraction);
+    map.current.on('touchstart', handleUserInteraction);
+    map.current.on('wheel', handleUserInteraction);
+    map.current.on('dblclick', handleUserInteraction);
+
     map.current.on('load', () => {
       setMapLoaded(true);
     });
 
     return () => {
-      map.current?.remove();
-      map.current = null;
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
+      themeControl.current = null;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Une seule fois !
+
+  // Changer le style de la carte quand le thème change (sans recréer la carte)
+  useEffect(() => {
+    if (!map.current) return;
+    
+    const mapStyle = theme === 'dark' 
+      ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+      : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
+    
+    map.current.setStyle(mapStyle);
+  }, [theme]);
+
+  // Mettre à jour l'icône du contrôle de thème quand le thème change
+  useEffect(() => {
+    if (themeControl.current) {
+      themeControl.current.updateTheme(theme);
+    }
+  }, [theme]);
 
   // Mettre à jour les marqueurs des véhicules
   useEffect(() => {
@@ -207,27 +324,58 @@ export default function MapComponent({
 
   // Centrer sur un véhicule sélectionné
   useEffect(() => {
-    if (!map.current || !selectedVehicleId) return;
+    if (!map.current || !selectedVehicleId) {
+      setIsTracking(false);
+      return;
+    }
 
     const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
     if (vehicle) {
+      // Activer le suivi et réinitialiser l'interaction utilisateur
+      isUserInteracting.current = false;
+      setIsTracking(true);
+
       map.current.flyTo({
         center: [vehicle.longitude, vehicle.latitude],
         zoom: 16,
         duration: 1000,
       });
 
-      // Ouvrir la popup du marqueur
-      const marker = markers.current.get(vehicle.id);
-      if (marker) {
-        // On s'assure que la popup est ouverte
-        if (!marker.getPopup().isOpen()) {
-          marker.togglePopup();
+      // Fermer toutes les popups ouvertes
+      markers.current.forEach((marker) => {
+        const popup = marker.getPopup();
+        if (popup && popup.isOpen()) {
+          popup.remove();
         }
-      }
+      });
+
+      // Ouvrir la popup du véhicule sélectionné après un court délai
+      setTimeout(() => {
+        const marker = markers.current.get(vehicle.id);
+        if (marker && map.current) {
+          const popup = marker.getPopup();
+          if (popup) {
+            popup.addTo(map.current);
+          }
+        }
+      }, 100);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedVehicleId]);
+
+  // Suivre le véhicule sélectionné quand il bouge (si le suivi est actif)
+  useEffect(() => {
+    if (!map.current || !selectedVehicleId || !isTracking) return;
+
+    const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+    if (vehicle) {
+      // Déplacer la carte en douceur vers la nouvelle position du véhicule
+      map.current.easeTo({
+        center: [vehicle.longitude, vehicle.latitude],
+        duration: 500,
+      });
+    }
+  }, [vehicles, selectedVehicleId, isTracking]);
 
   // Afficher le trajet du véhicule sélectionné
   useEffect(() => {

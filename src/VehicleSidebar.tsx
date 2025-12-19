@@ -8,6 +8,7 @@ interface VehicleSidebarProps {
   isOpen: boolean;
   onToggle: () => void;
   onVehicleSelect: (vehicleId: string) => void;
+  onVehicleSelectMobile?: () => void;
 }
 
 export default function VehicleSidebar({
@@ -15,11 +16,8 @@ export default function VehicleSidebar({
   isOpen,
   onToggle,
   onVehicleSelect,
+  onVehicleSelectMobile,
 }: VehicleSidebarProps) {
-  const formatTimestamp = (timestamp: number) => {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString('fr-FR');
-  };
 
   // Grouper les véhicules par ligne
   const vehiclesByRoute = vehicles.reduce((acc, vehicle) => {
@@ -61,7 +59,9 @@ export default function VehicleSidebar({
             minWidth: '44px',
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)',
-            backgroundColor: 'white',
+            backgroundColor: 'var(--g-color-base-background)',
+            color: 'var(--g-color-text-primary)',
+            border: '1px solid var(--g-color-line-generic)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center'
@@ -73,6 +73,7 @@ export default function VehicleSidebar({
 
       {/* Panneau latéral */}
       <div
+        className="vehicle-sidebar"
         style={{ 
           position: 'fixed',
           top: 0,
@@ -98,8 +99,8 @@ export default function VehicleSidebar({
           alignItems: 'center',
           justifyContent: 'space-between'
         }}>
-          <div>
-            <Text variant="header-1" style={{ color: 'white', marginBottom: '4px', fontSize: '18px' }}>
+          <div style={{ flex: 1 }}>
+            <Text variant="header-1" style={{ color: 'white', marginBottom: '12px', fontSize: '18px' }}>
               Véhicules SETRAM
             </Text>
             <Text variant="body-2" style={{ color: 'rgba(255,255,255,0.8)', fontSize: '12px' }}>
@@ -180,15 +181,19 @@ export default function VehicleSidebar({
                     {/* Véhicules de cette ligne */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                       {routeVehicles.map((vehicle) => (
-                        <Card
+                        <div
                           key={vehicle.id}
-                          view="outlined"
+                          onClick={() => {
+                            console.log('Vehicle clicked:', vehicle.id);
+                            onVehicleSelect(vehicle.id);
+                            onVehicleSelectMobile?.();
+                          }}
                           style={{ cursor: 'pointer' }}
-                          onClick={() => onVehicleSelect(vehicle.id)}
                         >
-                          <div style={{ padding: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            {/* Icône de véhicule */}
-                            <div style={{
+                          <Card view="outlined" style={{ backgroundColor: 'var(--g-color-base-background)' }}>
+                            <div style={{ padding: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              {/* Icône de véhicule */}
+                              <div style={{
                               width: '28px',
                               height: '28px',
                               borderRadius: '50%',
@@ -204,11 +209,11 @@ export default function VehicleSidebar({
                               boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
                             }}>
                               {text}
-                            </div>
+                              </div>
 
-                            {/* Infos du véhicule */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <Text variant="body-2" style={{ fontWeight: 600, marginBottom: '2px', fontSize: '12px', lineHeight: '1.2' }}>
+                              {/* Infos du véhicule */}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                              <Text variant="body-2" style={{ fontWeight: 600, marginBottom: '2px', fontSize: '12px', lineHeight: '1.2', color: 'var(--g-color-text-primary)' }}>
                                 {vehicle.label || `Véhicule ${vehicle.id.substring(0, 8)}`}
                               </Text>
 
@@ -217,7 +222,8 @@ export default function VehicleSidebar({
                                 flexWrap: 'wrap',
                                 gap: '6px',
                                 fontSize: '10px',
-                                lineHeight: '1.2'
+                                lineHeight: '1.2',
+                                color: 'var(--g-color-text-secondary)'
                               }}>
                                 {/* Vitesse */}
                                 {vehicle.speed !== undefined && (
@@ -253,7 +259,8 @@ export default function VehicleSidebar({
                               </div>
                             </div>
                           </div>
-                        </Card>
+                          </Card>
+                        </div>
                       ))}
                     </div>
                   </div>
