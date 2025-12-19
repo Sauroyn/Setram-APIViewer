@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Spin, Card, Text } from '@gravity-ui/uikit';
 import MapComponent from './MapComponent';
 import VehicleSidebar from './VehicleSidebar';
 import { fetchVehiclePositions, fetchTripUpdates, mergeVehicleData } from './gtfsService';
@@ -67,7 +68,7 @@ function App() {
       // Mise à jour de l'historique des positions
       setVehicleHistory((prevHistory) => {
         const newHistory = { ...prevHistory };
-        const MAX_HISTORY_POINTS = 100; // Maximum 100 points par véhicule
+        const MAX_HISTORY_POINTS = 50; // Maximum 50 points par véhicule
         const MAX_HISTORY_AGE = 3600; // Garder l'historique pendant 1 heure (en secondes)
         const now = Date.now() / 1000;
 
@@ -164,29 +165,66 @@ function App() {
 
       {/* Indicateur de chargement */}
       {isLoading && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-lg shadow-lg z-50">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-sm text-gray-700">Chargement des véhicules...</span>
-          </div>
-        </div>
+        <Card
+          view="filled"
+          style={{
+            position: 'fixed',
+            top: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            padding: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }}
+        >
+          <Spin size="m" />
+          <Text variant="body-2">Chargement des véhicules...</Text>
+        </Card>
       )}
 
       {/* Message d'erreur */}
       {error && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          <p className="text-sm">{error}</p>
-        </div>
+        <Card
+          view="filled"
+          style={{
+            position: 'fixed',
+            top: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            padding: '16px',
+            backgroundColor: 'var(--g-color-base-danger)',
+            color: 'white',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }}
+        >
+          <Text variant="body-2" style={{ color: 'white' }}>{error}</Text>
+        </Card>
       )}
 
       {/* Compteur de véhicules */}
       {!isLoading && !error && (
-        <div className="fixed bottom-4 right-4 bg-white px-4 py-2 rounded-lg shadow-lg z-40">
-          <p className="text-sm text-gray-700">
-            <span className="font-bold text-blue-600">{vehicles.length}</span> véhicule
-            {vehicles.length > 1 ? 's' : ''} en circulation
-          </p>
-        </div>
+        <Card
+          view="outlined"
+          style={{
+            position: 'fixed',
+            bottom: '16px',
+            right: '16px',
+            zIndex: 40,
+            padding: '12px 16px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}
+        >
+          <Text variant="body-2">
+            <span style={{ fontWeight: 600, color: 'var(--g-color-text-brand)' }}>
+              {vehicles.length}
+            </span>
+            {' '}véhicule{vehicles.length > 1 ? 's' : ''} en circulation
+          </Text>
+        </Card>
       )}
     </div>
   );
